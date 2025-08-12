@@ -1,8 +1,8 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, String, Vec, Map, Symbol, IntoVal, token
+    contract, contractimpl, contracttype, Address, Env, String, Vec, Symbol, token
 };
-use blend_contract_sdk::pool;
+use blend_contract_sdk::pool::{Request, Client};
 
 // ==================== DATA STRUCTS ====================
 
@@ -112,15 +112,25 @@ impl VaquitaPool {
             lock_period: period,
         };
         env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
+
+        // Step 5: Supply to Blend on contract’s behalf
+        let request = Request { 
+            request_type: 0u32, // Supply
+            address: token.clone(),
+            amount,
+        };
+        let requests = Vec::from_array(&env, [request]);
+        let pool_client = Client::new(&env, &pool_address);
+        pool_client.submit_with_allowance(&contract_address, &contract_address, &contract_address, &requests);
     
-        // Step 4: Update total shares for this period
+        // Step 6: Update total shares for this period
         let mut period_data: Period = env.storage().instance()
             .get(&DataKey::Periods(period))
             .unwrap_or(Period { reward_pool: 0, total_shares: 0 });
         period_data.total_shares += shares;
         env.storage().instance().set(&DataKey::Periods(period), &period_data);
     
-        // Step 5: Emit event
+        // Step 7: Emit event
         env.events().publish(
             (Symbol::new(&env, "deposit"), caller),
             (deposit_id, token, amount, shares),
@@ -142,6 +152,16 @@ impl VaquitaPool {
         let pool_address: Address = env.storage().instance().get(&DataKey::PoolAddress).unwrap();
         let contract_address = env.current_contract_address();
 
+        // Step 1: Withdraw from Blend - Blend will automatically calculate and return the interest
+        let request = Request { 
+            request_type: 1u32, // Withdraw
+            address: token.clone(),
+            amount: position.amount,
+        };
+        let requests = Vec::from_array(&env, [request]);
+        let pool_client = Client::new(&env, &pool_address);
+        pool_client.submit(&contract_address, &contract_address, &contract_address, &requests);
+
         let now = env.ledger().timestamp();
         let mut amount_to_transfer = position.amount;
         let mut reward: i128 = 0;
@@ -150,14 +170,15 @@ impl VaquitaPool {
 
         if now < position.finalization_time {
             // Early withdrawal fee
+            let interest = if position.amount > position.amount { position.amount - position.amount } else { 0 };
             let early_fee: i128 = env.storage().instance().get(&DataKey::EarlyWithdrawalFee).unwrap();
-            let fee_amount = (position.amount * early_fee) / 10000;
-            let remaining_interest = position.amount - fee_amount;
+            let fee_amount = (interest * early_fee) / 10000;
+            let remaining_interest = interest - fee_amount;
             let mut protocol_fees: i128 = env.storage().instance().get(&DataKey::ProtocolFees).unwrap();
             protocol_fees += fee_amount;
             env.storage().instance().set(&DataKey::ProtocolFees, &protocol_fees);
             period_data.reward_pool += remaining_interest;
-            amount_to_transfer -= fee_amount;
+            amount_to_transfer -= interest;
         } else {
             // Late withdrawal with rewards
             reward = Self::calculate_reward(&period_data, position.shares);
@@ -165,7 +186,7 @@ impl VaquitaPool {
             amount_to_transfer += reward;
         }
 
-        // Step 1: Transfer final amount from contract back to user
+        // Step 3: Transfer final amount from contract back to user
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&contract_address, &caller, &amount_to_transfer);
 
