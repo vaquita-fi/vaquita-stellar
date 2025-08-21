@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, String, Vec, Symbol, log, token::Client as TokenClient
+    contract, contractimpl, contracttype, Address, Env, String, Vec, Symbol, token::Client as TokenClient
 };
 soroban_sdk::contractimport!(file = "src/external_wasms/blend/pool.wasm");
 pub type BlendPoolClient<'a> = Client<'a>;
@@ -76,7 +76,6 @@ impl VaquitaPool {
 
     // ---------- Deposit ----------
     pub fn deposit(env: Env, caller: Address, deposit_id: String, amount: i128, period: u64) {
-        log!(&env, "Deposit called");
         caller.require_auth();
     
         if amount <= 0 {
@@ -93,9 +92,7 @@ impl VaquitaPool {
         }
     
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        log!(&env, "Token: {}", token);
         let pool_address: Address = env.storage().instance().get(&DataKey::PoolAddress).unwrap();
-        log!(&env, "Pool address: {}", pool_address);
         let contract_address = env.current_contract_address();
         let current_ledger = env.ledger().sequence();
         let finalization_time = env.ledger().timestamp() + period;
@@ -135,7 +132,6 @@ impl VaquitaPool {
         pool_client.submit_with_allowance(&contract_address, &contract_address, &contract_address, &requests);
 
         let b_rate = pool_client.get_reserve(&token).data.b_rate;
-        log!(&env, "B rate: {}", b_rate);
         position.b_rate = b_rate;
 
         env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
@@ -158,7 +154,7 @@ impl VaquitaPool {
     pub fn withdraw(env: Env, caller: Address, deposit_id: String) {
         caller.require_auth();
         
-        let mut position: Position = env.storage().instance().get(&DataKey::Positions(deposit_id.clone()))
+        let position: Position = env.storage().instance().get(&DataKey::Positions(deposit_id.clone()))
             .unwrap_or_else(|| panic!("Position not found"));
 
         if caller != position.owner {
@@ -181,8 +177,6 @@ impl VaquitaPool {
         } else {
             0
         };
-
-        log!(&env, "B tokens: {}, Amount to withdraw: {}, Interest: {}", b_tokens, amount_to_withdraw, interest);
 
         // Step 1: Withdraw from Blend with the correct amount
         let request = Request { 
@@ -229,9 +223,8 @@ impl VaquitaPool {
         period_data.total_shares -= position.shares;
         env.storage().instance().set(&DataKey::Periods(position.lock_period), &period_data);
 
-        position.owner = Address::from_str(&env, "");
         // Remove position
-        env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
+        env.storage().instance().remove(&DataKey::Positions(deposit_id.clone()));
 
         // Emit event
         env.events().publish(
