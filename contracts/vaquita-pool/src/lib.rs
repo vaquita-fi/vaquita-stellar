@@ -1,8 +1,12 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, String, Vec, Symbol, token
+    contract, contractimpl, contracttype, Address, Env, String, Vec, Symbol, log, token::Client as TokenClient
 };
-use blend_contract_sdk::pool::{Request, Client};
+soroban_sdk::contractimport!(file = "src/external_wasms/blend/pool.wasm");
+pub type BlendPoolClient<'a> = Client<'a>;
+pub const SCALAR_12: i128 = 1_000_000_000_000;
+
+mod test;
 
 // ==================== DATA STRUCTS ====================
 
@@ -14,6 +18,7 @@ pub struct Position {
     shares: i128,
     finalization_time: u64,
     lock_period: u64,
+    b_rate: i128,
 }
 
 #[derive(Clone)]
@@ -26,7 +31,7 @@ pub struct Period {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
-    Owner,
+    Admin,
     Token,
     PoolAddress,
     BasisPoints,
@@ -45,8 +50,11 @@ pub struct VaquitaPool;
 #[contractimpl]
 impl VaquitaPool {
     // ---------- Initialization ----------
-    pub fn initialize(env: Env, owner: Address, token: Address, pool_address: Address, lock_periods: Vec<u64>) {
-        env.storage().instance().set(&DataKey::Owner, &owner);
+    pub fn initialize(env: Env, admin: Address, token: Address, pool_address: Address, lock_periods: Vec<u64>) {
+        if env.storage().instance().has(&DataKey::Admin) {
+            panic!("Already initialized");
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::PoolAddress, &pool_address);
         env.storage().instance().set(&DataKey::BasisPoints, &10000i128);
@@ -60,14 +68,15 @@ impl VaquitaPool {
 
     // ---------- Owner Check ----------
     fn require_owner(env: &Env, caller: Address) {
-        let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
-        if caller != owner {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if caller != admin {
             panic!("Not owner");
         }
     }
 
     // ---------- Deposit ----------
     pub fn deposit(env: Env, caller: Address, deposit_id: String, amount: i128, period: u64) {
+        log!(&env, "Deposit called");
         caller.require_auth();
     
         if amount <= 0 {
@@ -84,13 +93,15 @@ impl VaquitaPool {
         }
     
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
+        log!(&env, "Token: {}", token);
         let pool_address: Address = env.storage().instance().get(&DataKey::PoolAddress).unwrap();
+        log!(&env, "Pool address: {}", pool_address);
         let contract_address = env.current_contract_address();
         let current_ledger = env.ledger().sequence();
         let finalization_time = env.ledger().timestamp() + period;
     
         // Step 1: Pull tokens from user
-        let token_client = token::Client::new(&env, &token);
+        let token_client = TokenClient::new(&env, &token);
         token_client.transfer(&caller, &contract_address, &amount);
     
         // Step 2: Approve pool to spend from contract
@@ -104,14 +115,14 @@ impl VaquitaPool {
         // Step 3: Track shares (simplified)
         let shares = amount;
     
-        let position = Position {
+        let mut position = Position {
             owner: caller.clone(),
             amount,
             shares,
             finalization_time,
             lock_period: period,
+            b_rate: 0,
         };
-        env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
 
         // Step 5: Supply to Blend on contract’s behalf
         let request = Request { 
@@ -120,8 +131,14 @@ impl VaquitaPool {
             amount,
         };
         let requests = Vec::from_array(&env, [request]);
-        let pool_client = Client::new(&env, &pool_address);
+        let pool_client = BlendPoolClient::new(&env, &pool_address);
         pool_client.submit_with_allowance(&contract_address, &contract_address, &contract_address, &requests);
+
+        let b_rate = pool_client.get_reserve(&token).data.b_rate;
+        log!(&env, "B rate: {}", b_rate);
+        position.b_rate = b_rate;
+
+        env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
     
         // Step 6: Update total shares for this period
         let mut period_data: Period = env.storage().instance()
@@ -129,7 +146,7 @@ impl VaquitaPool {
             .unwrap_or(Period { reward_pool: 0, total_shares: 0 });
         period_data.total_shares += shares;
         env.storage().instance().set(&DataKey::Periods(period), &period_data);
-    
+
         // Step 7: Emit event
         env.events().publish(
             (Symbol::new(&env, "deposit"), caller),
@@ -141,7 +158,7 @@ impl VaquitaPool {
     pub fn withdraw(env: Env, caller: Address, deposit_id: String) {
         caller.require_auth();
         
-        let position: Position = env.storage().instance().get(&DataKey::Positions(deposit_id.clone()))
+        let mut position: Position = env.storage().instance().get(&DataKey::Positions(deposit_id.clone()))
             .unwrap_or_else(|| panic!("Position not found"));
 
         if caller != position.owner {
@@ -152,25 +169,43 @@ impl VaquitaPool {
         let pool_address: Address = env.storage().instance().get(&DataKey::PoolAddress).unwrap();
         let contract_address = env.current_contract_address();
 
-        // Step 1: Withdraw from Blend - Blend will automatically calculate and return the interest
+        // // Get current bToken rate from the pool
+        let pool_client = BlendPoolClient::new(&env, &pool_address);
+        let current_b_rate = pool_client.get_reserve(&token).data.b_rate;
+        
+        // Calculate bTokens and interest using Aave-like formula
+        let b_tokens = (position.amount * SCALAR_12) / position.b_rate;
+        let amount_to_withdraw = (b_tokens * current_b_rate) / SCALAR_12;
+        let interest = if amount_to_withdraw - position.amount > 0 {
+            amount_to_withdraw - position.amount
+        } else {
+            0
+        };
+
+        log!(&env, "B tokens: {}, Amount to withdraw: {}, Interest: {}", b_tokens, amount_to_withdraw, interest);
+
+        // Step 1: Withdraw from Blend with the correct amount
         let request = Request { 
             request_type: 1u32, // Withdraw
             address: token.clone(),
-            amount: position.amount,
+            amount: amount_to_withdraw,
         };
         let requests = Vec::from_array(&env, [request]);
-        let pool_client = Client::new(&env, &pool_address);
+        
+        // Use submit_with_allowance instead of submit for withdrawals
         pool_client.submit(&contract_address, &contract_address, &contract_address, &requests);
 
         let now = env.ledger().timestamp();
-        let mut amount_to_transfer = position.amount;
+        let mut amount_to_transfer = amount_to_withdraw;
         let mut reward: i128 = 0;
 
-        let mut period_data: Period = env.storage().instance().get(&DataKey::Periods(position.lock_period)).unwrap();
+        // Get period data with proper error handling
+        let mut period_data: Period = env.storage().instance()
+            .get(&DataKey::Periods(position.lock_period))
+            .unwrap_or_else(|| panic!("Period data not found for lock period: {}", position.lock_period));
 
         if now < position.finalization_time {
-            // Early withdrawal fee
-            let interest = if position.amount > position.amount { position.amount - position.amount } else { 0 };
+            // Early withdrawal fee on interest only
             let early_fee: i128 = env.storage().instance().get(&DataKey::EarlyWithdrawalFee).unwrap();
             let fee_amount = (interest * early_fee) / 10000;
             let remaining_interest = interest - fee_amount;
@@ -180,22 +215,23 @@ impl VaquitaPool {
             period_data.reward_pool += remaining_interest;
             amount_to_transfer -= interest;
         } else {
-            // Late withdrawal with rewards
+            // Late withdrawal with additional rewards from reward pool
             reward = Self::calculate_reward(&period_data, position.shares);
             period_data.reward_pool -= reward;
-            amount_to_transfer += reward;
+            amount_to_transfer += reward; // Add reward pool rewards on top of interest
         }
 
         // Step 3: Transfer final amount from contract back to user
-        let token_client = token::Client::new(&env, &token);
+        let token_client = TokenClient::new(&env, &token);
         token_client.transfer(&contract_address, &caller, &amount_to_transfer);
 
         // Update shares
         period_data.total_shares -= position.shares;
         env.storage().instance().set(&DataKey::Periods(position.lock_period), &period_data);
 
+        position.owner = Address::from_str(&env, "");
         // Remove position
-        env.storage().instance().remove(&DataKey::Positions(deposit_id.clone()));
+        env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
 
         // Emit event
         env.events().publish(
@@ -219,7 +255,7 @@ impl VaquitaPool {
         let protocol_fees: i128 = env.storage().instance().get(&DataKey::ProtocolFees).unwrap();
         
         if protocol_fees > 0 {
-            let token_client = token::Client::new(&env, &token);
+            let token_client = TokenClient::new(&env, &token);
             token_client.transfer(&contract_address, &caller, &protocol_fees);
             env.storage().instance().set(&DataKey::ProtocolFees, &0i128);
         }
@@ -231,7 +267,7 @@ impl VaquitaPool {
         // First transfer the reward tokens from owner to contract
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let contract_address = env.current_contract_address();
-        let token_client = token::Client::new(&env, &token);
+        let token_client = TokenClient::new(&env, &token);
         token_client.transfer(&caller, &contract_address, &reward_amount);
         
         let supported: bool = env.storage().instance().get(&DataKey::SupportedLockPeriod(period)).unwrap_or(false);

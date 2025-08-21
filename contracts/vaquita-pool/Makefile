@@ -19,9 +19,9 @@ initialize: deploy
 	stellar contract invoke --source $(SOURCE_ACCOUNT) --network testnet --id vaquita_pool \
 	-- \
 	initialize \
-	--owner $(USER_ADDRESS) \
+	--admin $(USER_ADDRESS) \
 	--token CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU \
-	--pool_address CCLBPEYS3XFK65MYYXSBMOGKUI4ODN5S7SUZBGD7NALUQF64QILLX5B5 \
+	--pool_address CDDG7DLOWSHRYQ2HWGZEZ4UTR7LPTKFFHN3QUCSZEXOWOPARMONX6T65 \
 	--lock_periods "[604800]"
 
 deposit:
