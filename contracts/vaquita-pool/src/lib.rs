@@ -146,7 +146,7 @@ impl VaquitaPool {
         // Step 7: Emit event
         env.events().publish(
             (Symbol::new(&env, "deposit"), caller),
-            (deposit_id, token, amount, shares),
+            (deposit_id, token, amount, b_rate),
         );
     }
 
