@@ -15,7 +15,6 @@ mod test;
 pub struct Position {
     owner: Address,
     amount: i128,
-    shares: i128,
     finalization_time: u64,
     lock_period: u64,
     b_rate: i128,
@@ -25,7 +24,7 @@ pub struct Position {
 #[contracttype]
 pub struct Period {
     reward_pool: i128,
-    total_shares: i128,
+    total_deposits: i128,
 }
 
 #[derive(Clone)]
@@ -109,13 +108,11 @@ impl VaquitaPool {
             &(current_ledger + 600),
         );
     
-        // Step 3: Track shares (simplified)
-        let shares = amount;
+        // Step 3: Track deposits (simplified)
     
         let mut position = Position {
             owner: caller.clone(),
             amount,
-            shares,
             finalization_time,
             lock_period: period,
             b_rate: 0,
@@ -136,11 +133,11 @@ impl VaquitaPool {
 
         env.storage().instance().set(&DataKey::Positions(deposit_id.clone()), &position);
     
-        // Step 6: Update total shares for this period
+        // Step 6: Update total deposits for this period
         let mut period_data: Period = env.storage().instance()
             .get(&DataKey::Periods(period))
-            .unwrap_or(Period { reward_pool: 0, total_shares: 0 });
-        period_data.total_shares += shares;
+            .unwrap_or(Period { reward_pool: 0, total_deposits: 0 });
+        period_data.total_deposits += amount;
         env.storage().instance().set(&DataKey::Periods(period), &period_data);
 
         // Step 7: Emit event
@@ -210,7 +207,7 @@ impl VaquitaPool {
             amount_to_transfer -= interest;
         } else {
             // Late withdrawal with additional rewards from reward pool
-            reward = Self::calculate_reward(&period_data, position.shares);
+            reward = Self::calculate_reward(&period_data, position.amount);
             period_data.reward_pool -= reward;
             amount_to_transfer += reward; // Add reward pool rewards on top of interest
         }
@@ -219,8 +216,7 @@ impl VaquitaPool {
         let token_client = TokenClient::new(&env, &token);
         token_client.transfer(&contract_address, &caller, &amount_to_transfer);
 
-        // Update shares
-        period_data.total_shares -= position.shares;
+        period_data.total_deposits -= position.amount;
         env.storage().instance().set(&DataKey::Periods(position.lock_period), &period_data);
 
         // Remove position
@@ -233,15 +229,16 @@ impl VaquitaPool {
         );
     }
 
-    fn calculate_reward(period_data: &Period, shares: i128) -> i128 {
-        if period_data.total_shares == 0 {
+    fn calculate_reward(period_data: &Period, amount: i128) -> i128 {
+        if period_data.total_deposits == 0 {
             return 0;
         }
-        (period_data.reward_pool * shares) / period_data.total_shares
+        (period_data.reward_pool * amount) / period_data.total_deposits
     }
 
     // ---------- Owner functions ----------
     pub fn withdraw_protocol_fees(env: Env, caller: Address) {
+        caller.require_auth();
         Self::require_owner(&env, caller.clone());
         let token: Address = env.storage().instance().get(&DataKey::Token).unwrap();
         let contract_address = env.current_contract_address();
@@ -255,6 +252,7 @@ impl VaquitaPool {
     }
 
     pub fn add_rewards(env: Env, caller: Address, period: u64, reward_amount: i128) {
+        caller.require_auth();
         Self::require_owner(&env, caller.clone());
         
         // First transfer the reward tokens from owner to contract
@@ -269,7 +267,7 @@ impl VaquitaPool {
         }
         let mut period_data: Period = env.storage().instance().get(&DataKey::Periods(period)).unwrap_or(Period {
             reward_pool: 0,
-            total_shares: 0,
+            total_deposits: 0,
         });
         period_data.reward_pool += reward_amount;
         env.storage().instance().set(&DataKey::Periods(period), &period_data);

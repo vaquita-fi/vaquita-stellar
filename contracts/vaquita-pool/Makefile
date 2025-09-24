@@ -40,6 +40,14 @@ withdraw:
 	--caller $(USER_ADDRESS) \
 	--deposit_id $(DEPOSIT_ID)
 
+add-rewards:
+	stellar contract invoke --id vaquita_pool --source $(SOURCE_ACCOUNT) --network testnet \
+	-- \
+	add_rewards \
+	--caller $(USER_ADDRESS) \
+	--period 604800 \
+	--reward_amount 10000000
+
 fmt:
 	cargo fmt --all
 
