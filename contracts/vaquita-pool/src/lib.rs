@@ -105,7 +105,7 @@ impl VaquitaPool {
             &contract_address,
             &pool_address,
             &amount,
-            &(current_ledger + 600),
+            &(current_ledger),
         );
     
         // Step 3: Track deposits (simplified)
