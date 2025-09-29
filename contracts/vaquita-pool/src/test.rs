@@ -13,10 +13,6 @@ use soroban_sdk::{
 use soroban_sdk::{token::StellarAssetClient};
 use soroban_fixed_point_math::FixedPoint;
 
-// use super::*;
-// use soroban_sdk::{log, testutils::{Address as _, Logs}, token::{Client as TokenClient, StellarAssetClient}, Env, Vec, String};
-// use sep_41_token::testutils::{MockTokenClient, MockTokenWASM};
-
 // Blend Fixture
 pub mod comet {
     soroban_sdk::contractimport!(file = "src/external_wasms/blend/comet.wasm");
