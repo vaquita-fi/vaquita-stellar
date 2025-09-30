@@ -1,0 +1,58 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Rust build artifacts
+target/
+**/target/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment files (we'll copy env.example instead)
+.env
+
+# Node modules (if any)
+node_modules/
+
+# Python cache (if any)
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Documentation build artifacts
+docs/_build/
+
+# Test artifacts
+test_snapshots/
+*.wasm
+
+# Build outputs
+*.wasm
+*.wasm.gz

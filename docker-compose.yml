@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  vaquita-stellar:
+    build: .
+    container_name: vaquita-stellar-dev
+    volumes:
+      # Mount the current directory to /workspace in the container
+      - .:/workspace
+      # Mount cargo registry for faster builds
+      - cargo-cache:/home/developer/.cargo/registry
+      # Mount cargo git cache
+      - cargo-git-cache:/home/developer/.cargo/git
+    working_dir: /workspace
+    environment:
+      - RUST_BACKTRACE=1
+      - CARGO_TARGET_DIR=/workspace/target
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+volumes:
+  cargo-cache:
+  cargo-git-cache:
