@@ -1,0 +1,68 @@
+name: Deploy Smart Contract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - testnet
+          - mainnet
+        default: 'testnet'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        
+    - name: Install Stellar CLI
+      run: |
+        curl -sSL https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-23.1.3-x86_64-unknown-linux-gnu.tar.gz | tar -xz -C /usr/local/bin
+        
+    - name: Build contract
+      run: |
+        cd contracts/vaquita-pool
+        make build
+        
+    - name: Deploy contract
+      run: |
+        cd contracts/vaquita-pool
+        if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
+          export SOURCE_ACCOUNT="${{ secrets.STELLAR_PRIVATE_KEY_MAINNET }}"
+          export USER_ADDRESS="${{ secrets.USER_ADDRESS_MAINNET }}"
+        else
+          export SOURCE_ACCOUNT="${{ secrets.STELLAR_PRIVATE_KEY_TESTNET }}"
+          export USER_ADDRESS="${{ secrets.USER_ADDRESS_TESTNET }}"
+        fi
+        export NETWORK="${{ github.event.inputs.environment || 'testnet' }}"
+        
+        # Deploy contract
+        make deploy
+        
+    - name: Initialize contract
+      run: |
+        cd contracts/vaquita-pool
+        if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
+          export SOURCE_ACCOUNT="${{ secrets.STELLAR_PRIVATE_KEY_MAINNET }}"
+          export USER_ADDRESS="${{ secrets.USER_ADDRESS_MAINNET }}"
+        else
+          export SOURCE_ACCOUNT="${{ secrets.STELLAR_PRIVATE_KEY_TESTNET }}"
+          export USER_ADDRESS="${{ secrets.USER_ADDRESS_TESTNET }}"
+        fi
+        export NETWORK="${{ github.event.inputs.environment || 'testnet' }}"
+        
+        # Initialize contract with default lock periods
+        make initialize
