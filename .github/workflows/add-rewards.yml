@@ -53,7 +53,7 @@ jobs:
           export USER_ADDRESS="${{ secrets.USER_ADDRESS_TESTNET }}"
           export CONTRACT_ID="${{ secrets.CONTRACT_ID_TESTNET }}"
         fi
-        export PERIOD="${{ github.event.inputs.period_seconds }}"
+        export LOCK_PERIOD="${{ github.event.inputs.period_seconds }}"
         export REWARD_AMOUNT="${{ github.event.inputs.reward_amount }}"
         export NETWORK="${{ github.event.inputs.environment }}"
         
