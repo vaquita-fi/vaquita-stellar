@@ -46,9 +46,11 @@ jobs:
         if [ "${{ github.event.inputs.environment }}" = "mainnet" ]; then
           export SOURCE_ACCOUNT="${{ secrets.STELLAR_PRIVATE_KEY_MAINNET }}"
           export USER_ADDRESS="${{ secrets.USER_ADDRESS_MAINNET }}"
+          export CONTRACT_ID="${{ secrets.CONTRACT_ID_MAINNET }}"
         else
           export SOURCE_ACCOUNT="${{ secrets.STELLAR_PRIVATE_KEY_TESTNET }}"
           export USER_ADDRESS="${{ secrets.USER_ADDRESS_TESTNET }}"
+          export CONTRACT_ID="${{ secrets.CONTRACT_ID_TESTNET }}"
         fi
         export LOCK_PERIOD="${{ github.event.inputs.lock_period_seconds }}"
         export NETWORK="${{ github.event.inputs.environment }}"
@@ -57,7 +59,7 @@ jobs:
         stellar contract invoke \
           --source $SOURCE_ACCOUNT \
           --network $NETWORK \
-          --id vaquita_pool \
+          --id $CONTRACT_ID \
           -- \
           add_lock_period \
           --caller $USER_ADDRESS \

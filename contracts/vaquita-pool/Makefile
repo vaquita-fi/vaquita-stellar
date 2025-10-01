@@ -1,4 +1,4 @@
-include ../../.env
+-include ../../.env
 
 default: build
 
@@ -14,9 +14,10 @@ build:
 
 deploy: build
 	stellar contract deploy --source $(SOURCE_ACCOUNT) --network $(NETWORK) --wasm ../../target/wasm32v1-none/release/vaquita_pool.wasm --alias vaquita_pool
+	CONTRACT_ID=$(stellar contract alias show vaquita_pool)
 
 initialize: deploy
-	stellar contract invoke --source $(SOURCE_ACCOUNT) --network $(NETWORK) --id vaquita_pool \
+	stellar contract invoke --source $(SOURCE_ACCOUNT) --network $(NETWORK) --id $(CONTRACT_ID) \
 	-- \
 	initialize \
 	--admin $(USER_ADDRESS) \
@@ -25,7 +26,7 @@ initialize: deploy
 	--lock_periods "[$(LOCK_PERIODS)]"
 
 deposit:
-	stellar contract invoke --id vaquita_pool --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
+	stellar contract invoke --id $(CONTRACT_ID) --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
 	-- \
 	deposit \
 	--caller $(USER_ADDRESS) \
@@ -34,14 +35,14 @@ deposit:
 	--period $(LOCK_PERIOD)
 
 withdraw:
-	stellar contract invoke --id vaquita_pool --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
+	stellar contract invoke --id $(CONTRACT_ID) --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
 	-- \
 	withdraw \
 	--caller $(USER_ADDRESS) \
 	--deposit_id $(DEPOSIT_ID)
 
 add-lock-period:
-	stellar contract invoke --id vaquita_pool --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
+	stellar contract invoke --id $(CONTRACT_ID) --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
 	-- \
 	add_lock_period \
 	--caller $(USER_ADDRESS) \
@@ -49,7 +50,7 @@ add-lock-period:
 
 
 add-rewards:
-	stellar contract invoke --id vaquita_pool --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
+	stellar contract invoke --id $(CONTRACT_ID) --source $(SOURCE_ACCOUNT) --network $(NETWORK) \
 	-- \
 	add_rewards \
 	--caller $(USER_ADDRESS) \
